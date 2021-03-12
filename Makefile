@@ -11,10 +11,10 @@ server: server.c
 
 SERVER_PORT := 8080
 
-TESTFILE_1 = file_4K.bin
-TESTFILE_2 = file_2M.bin
-TESTFILE_3 = file_0B.bin
-TESTFILE_4 = file_512M.bin
+TESTFILE_1 = test/file_4K.bin
+TESTFILE_2 = test/file_2M.bin
+TESTFILE_3 = test/file_0B.bin
+TESTFILE_4 = test/file_512M.bin
 
 TESTFILE := $(TESTFILE_1)
 
