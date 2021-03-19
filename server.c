@@ -17,7 +17,7 @@ void error(const char *msg) {
 }
 
 int main (int argc, char *argv[]) {
-    if (argc < 3 || strcmp (argv[1], "-p") != 0) {
+    if(argc < 3 || strcmp (argv[1], "-p") != 0) {
         printf ("Usage: %s -p <port>\nServes and creates files under the current directory, no URL encoding supported\n", argv[0]);
         exit(EXIT_FAILURE);
     }

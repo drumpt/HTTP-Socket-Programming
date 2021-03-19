@@ -40,8 +40,6 @@ There is NO WARRANTY, to the extent permitted by law.
 Linux 4.19.0-14-amd64 #1 SMP Debian 4.19.171-2 (2021-01-30) x86_64 GNU/Linux
 ```
 
-
-
 ## Build
 ```bash
 $ make all
