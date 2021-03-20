@@ -207,8 +207,6 @@ int main(int argc, char *argv[]) {
             char *packet = malloc(strlen(request_line) + strlen(header_lines) + strlen(stdin_buffer) + 1);
             make_packet(packet, request_line, header_lines, stdin_buffer);
 
-            printf(packet);
-
             while((n = send(sock_fd, packet, strlen(packet), 0)) == -1) {
                 if(errno == EINTR) continue;
                 else fprintf(stderr, "Send Error : %s\n", strerror(errno));
@@ -217,7 +215,6 @@ int main(int argc, char *argv[]) {
             while((n = recv(sock_fd, recv_buffer, sizeof(recv_buffer), 0)) > 0) {
                 printf(recv_buffer);
             }
-            memset(recv_buffer, 0, sizeof(recv_buffer));
         }
     }
     exit(EXIT_SUCCESS);
