@@ -7,7 +7,9 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+
 #include <netdb.h>
+
 
 #define PACKET_SIZE 1024
 
@@ -178,9 +180,8 @@ int main(int argc, char *argv[]) {
     }
 
     // 3. Read and write packets based on GET or POST method
-    int n;
+    int num_bytes;
     char recv_buffer[PACKET_SIZE];
-    memset(recv_buffer, 0, sizeof(recv_buffer));
 
     if(strcmp(argv[1], "-G") == 0) { // GET
         char *request_line = make_request_line(argv[1], argv[2]);
@@ -189,33 +190,45 @@ int main(int argc, char *argv[]) {
         char *packet = malloc(strlen(request_line) + strlen(header_lines) + strlen(body) + 1);
         make_packet(packet, request_line, header_lines, body);
 
-        while((n = send(sock_fd, packet, strlen(packet), 0)) == -1) {
+        printf("%s\n", packet);
+
+        while((num_bytes = send(sock_fd, packet, PACKET_SIZE, 0)) == -1) { // send request once
             if(errno == EINTR) continue;
             else fprintf(stderr, "Send Error : %s\n", strerror(errno));
         }
 
-        while((n = recv(sock_fd, recv_buffer, sizeof(recv_buffer), 0)) > 0) {
+        while((num_bytes = recv(sock_fd, recv_buffer, PACKET_SIZE, 0)) > 0) { // receive all packets
             printf(recv_buffer);
+            memset(recv_buffer, 0, PACKET_SIZE);
         }
     } else { // POST
-        char stdin_buffer[PACKET_SIZE];
-        memset(stdin_buffer, 0, sizeof(stdin_buffer));
+        char *filename = get_filename_from_url(argv[2]);
+        int MAX_BODY_SIZE =
+            PACKET_SIZE
+            - (20 + strlen(filename) + 1)
+            - (8 + strlen(host) + 18 + 12 * sizeof(int) + 10 + strlen("Content-Type: application/octet-stream\r\n") + 10);
+        char stdin_buffer[MAX_BODY_SIZE]; // maximum body size
 
-        while(fgets(stdin_buffer, PACKET_SIZE, stdin) != NULL) {
+        while(fgets(stdin_buffer, MAX_BODY_SIZE, stdin) != NULL) { // send all packets
             char *request_line = make_request_line(argv[1], argv[2]);
             char *header_lines = make_header_lines(argv[1], argv[2], strlen(stdin_buffer));
             char *packet = malloc(strlen(request_line) + strlen(header_lines) + strlen(stdin_buffer) + 1);
             make_packet(packet, request_line, header_lines, stdin_buffer);
 
-            while((n = send(sock_fd, packet, strlen(packet), 0)) == -1) {
+            // printf("%s\n", packet);
+
+            while((num_bytes = send(sock_fd, packet, PACKET_SIZE, 0)) == -1) {
                 if(errno == EINTR) continue;
                 else fprintf(stderr, "Send Error : %s\n", strerror(errno));
             }
+            memset(stdin_buffer, 0, MAX_BODY_SIZE);
+        }
 
-            while((n = recv(sock_fd, recv_buffer, sizeof(recv_buffer), 0)) > 0) {
-                printf(recv_buffer);
-            }
+        while((num_bytes = recv(sock_fd, recv_buffer, PACKET_SIZE, 0)) > 0) { // receive all packets
+            printf(recv_buffer);
+            memset(recv_buffer, 0, PACKET_SIZE);
         }
     }
+    close(sock_fd);
     exit(EXIT_SUCCESS);
 }
