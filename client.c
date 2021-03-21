@@ -81,7 +81,7 @@ char *get_port_from_url(char *url) {
 char *get_filename_from_url(char *url) {
     char **splitted_url;
     int i, count = split(url, '/', &splitted_url);
-    char *filename = calloc(strlen(url) + 1, 0);
+    char *filename = (char *) calloc(strlen(url) + 1, 0);
     for(int i = 3; i < count; ++i) { // http://host:port/file
         strcat(filename, splitted_url[i]);
         if(i < count - 1) strcat(filename, "/");
@@ -92,7 +92,7 @@ char *get_filename_from_url(char *url) {
 char *make_request_line(char *method, char *url) {
     char *filename = get_filename_from_url(url);
     int request_line_size = 20 + strlen(filename);
-    char *request_line = calloc(request_line_size + 1, sizeof(char));
+    char *request_line = (char *) calloc(request_line_size + 1, sizeof(char));
 
     if(strcmp(method, "-G") == 0) { // get
         // int request_line_size = 16 + strlen(filename);
@@ -126,7 +126,7 @@ char *make_header_lines(char *method, char *url, int buffer_size) {
         sprintf(content_length, "%d", buffer_size);
     }
     header_lines_size = 8 + strlen(host) + 18 + strlen(content_length) + strlen("Content-Type: application/octet-stream\r\n") + 10;
-    header_lines = calloc(header_lines_size + 1, sizeof(char));
+    header_lines = (char *) calloc(header_lines_size + 1, sizeof(char));
     snprintf(
         header_lines,
         header_lines_size,
@@ -139,10 +139,9 @@ char *make_header_lines(char *method, char *url, int buffer_size) {
     return header_lines;
 }
 
-void make_packet(char *packet, const char *request_line, const char *header_lines, const char *body) {
+void make_packet(char *packet, const char *request_line, const char *header_lines, const char *body, const size_t body_size) {
     size_t request_line_size = strlen(request_line);
     size_t header_lines_size = strlen(header_lines);
-    size_t body_size = strlen(body);
 
     if(packet) {
         memcpy(packet, request_line, request_line_size);
@@ -166,6 +165,8 @@ int main(int argc, char *argv[]) {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
 
+    printf("Hi~\n");
+
     char *host = get_host_from_url(argv[2]);
     char *port = get_port_from_url(argv[2]);
     if(getaddrinfo(host, port, &hints, &serv_addr) != 0) {
@@ -184,16 +185,19 @@ int main(int argc, char *argv[]) {
         error("Error : connection failed\n");
     }
 
+    printf("Hello~\n");
+
     // 3. Read and write packets based on GET or POST method
-    int num_bytes;
+    int num_bytes, packet_size;
     char recv_buffer[PACKET_SIZE];
+    memset(recv_buffer, 0, PACKET_SIZE);
 
     if(strcmp(argv[1], "-G") == 0) { // GET
         char *request_line = make_request_line(argv[1], argv[2]);
         char *header_lines = make_header_lines(argv[1], argv[2], 0);
         char *body = "";
-        char *packet = calloc(strlen(request_line) + strlen(header_lines) + strlen(body) + 1, sizeof(char));
-        make_packet(packet, request_line, header_lines, body);
+        char *packet = (char *) calloc(strlen(request_line) + strlen(header_lines) + strlen(body), sizeof(char));
+        make_packet(packet, request_line, header_lines, body, 0);
 
         printf("%s\n", packet);
 
@@ -203,7 +207,8 @@ int main(int argc, char *argv[]) {
         }
 
         while((num_bytes = recv(sock_fd, recv_buffer, PACKET_SIZE, 0)) > 0) { // receive all packets
-            printf(recv_buffer);
+            printf("%d\n", num_bytes);
+            printf("%s\n", recv_buffer);
             memset(recv_buffer, 0, PACKET_SIZE);
         }
         // if(packet) free(packet);
@@ -214,25 +219,29 @@ int main(int argc, char *argv[]) {
             - (20 + strlen(filename) + 1)
             - (8 + strlen(host) + 18 + 12 * sizeof(int) + 10 + strlen("Content-Type: application/octet-stream\r\n") + 10);
         char stdin_buffer[MAX_BODY_SIZE]; // maximum body size
+        memset(stdin_buffer, 0, MAX_BODY_SIZE);
 
-        while(fgets(stdin_buffer, MAX_BODY_SIZE, stdin) != NULL) { // send all packets
+        size_t total_file_length = 0;
+
+        while((num_bytes = fread(stdin_buffer, sizeof(char), MAX_BODY_SIZE, stdin)) > 0) { // send all packets
             char *request_line = make_request_line(argv[1], argv[2]);
-            char *header_lines = make_header_lines(argv[1], argv[2], strlen(stdin_buffer));
-            char *packet = calloc(strlen(request_line) + strlen(header_lines) + strlen(stdin_buffer) + 1, sizeof(char));
-            make_packet(packet, request_line, header_lines, stdin_buffer);
+            char *header_lines = make_header_lines(argv[1], argv[2], num_bytes);
+            char *packet = (char *) calloc(strlen(request_line) + strlen(header_lines) + num_bytes, sizeof(char));
+            make_packet(packet, request_line, header_lines, stdin_buffer, num_bytes);
 
             // printf("%s\n", packet);
+            total_file_length += num_bytes;
 
-            while((num_bytes = send(sock_fd, packet, PACKET_SIZE, 0)) == -1) {
+            while((num_bytes = send(sock_fd, packet, strlen(request_line) + strlen(header_lines) + num_bytes, 0)) == -1) {
                 if(errno == EINTR) continue;
                 else fprintf(stderr, "Send Error : %s\n", strerror(errno));
             }
             memset(stdin_buffer, 0, MAX_BODY_SIZE);
             // if(packet) free(packet);
         }
-
+        // printf("%u\n", total_file_length);
         while((num_bytes = recv(sock_fd, recv_buffer, PACKET_SIZE, 0)) > 0) { // receive all packets
-            printf(recv_buffer);
+            printf("%s\n", recv_buffer);
             memset(recv_buffer, 0, PACKET_SIZE);
         }
         // if(filename) free(filename);

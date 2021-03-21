@@ -3,10 +3,10 @@
 all: client server
 
 client: client.c
-	cc -o client client.c
+	gcc-9 -o client client.c
 
 server: server.c
-	cc -o server server.c
+	gcc-9 -o server server.c
 
 
 SERVER_PORT := 8080
