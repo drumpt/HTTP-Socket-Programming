@@ -85,12 +85,12 @@ char *strstrtok(char *src, char *sep) {
 }
 
 char *get_header_from_packet(char *packet) {
-    char *copied_packet = malloc(strlen(packet) + 1);
+    char *copied_packet = calloc(strlen(packet) + 1, sizeof(char));
     if(copied_packet) {
         memcpy(copied_packet, packet, strlen(packet));
 
         char *token = strstrtok(copied_packet, "\r\n\r\n");
-        char *header = malloc(strlen(copied_packet));
+        char *header = calloc(strlen(copied_packet), sizeof(char));
         memcpy(header, token, strlen(token));
         memcpy(header + strlen(token), "\r\n\r\n", 4);
 
@@ -99,24 +99,42 @@ char *get_header_from_packet(char *packet) {
     }
 }
 
-char **get_method_from_header(char *header) {
-    char *copied_header = malloc(strlen(header) + 1);
+char *get_method_from_header(char *header) {
+    char *copied_header = calloc(strlen(header) + 1, sizeof(char));
     if(copied_header) {
         memcpy(copied_header, header, strlen(header));
+
+        char *token = strstrtok(copied_header, " ");
+        char *method = calloc(strlen(copied_header) + 1, sizeof(char));
+        memcpy(method, token, strlen(token));
+
+        free(copied_header);
+        return method;
     }
 }
 
 char *get_filename_from_header(char *header) {
+    char *copied_header = calloc(strlen(header) + 1, sizeof(char));
+    if(copied_header) {
+        memcpy(copied_header, header, strlen(header));
 
+        char *token = strstrtok(copied_header, " ");
+        char *filename = calloc(strlen(copied_header) + 1, sizeof(char));
+        token = strstrtok(NULL, " ");
+        memcpy(filename, token + 1, strlen(token) - 1);
+
+        free(copied_header);
+        return filename;
+    }
 }
 
 char *get_body_length_from_header(char *header) {
-    char *copied_header = malloc(strlen(header) + 1);
+    char *copied_header = calloc(strlen(header) + 1, sizeof(char));
     if(copied_header) {
         memcpy(copied_header, header, strlen(header));
 
         char *token = strstrtok(copied_header, "\r\n");
-        char *body_length = malloc(strlen(copied_header));
+        char *body_length = calloc(strlen(copied_header), sizeof(char));
         while(token != NULL) {
             if(strncmp(token, "Content-Length:", strlen("Content-Length:")) == 0) {
                 char *body_length_token = strstrtok(token, ": ");
@@ -131,20 +149,67 @@ char *get_body_length_from_header(char *header) {
     }
 }
 
-char *get_body_from_packet(char *packet, size_t body_length) {
-    char *copied_packet = malloc(strlen(packet) + 1);
-    if(copied_packet) {
-        memcpy(copied_packet, packet, strlen(packet));
+char *make_status_line(char *code) {
+    int status_line_size = 27;
+    char *status_line = calloc(status_line_size + 1, sizeof(char));
 
-        char *token = strstrtok(copied_packet, "\r\n\r\n");
-        char *body = malloc(strlen(copied_packet));
-
-        token = strstrtok(NULL, "\r\n\r\n"); // ignore header
-        memcpy(body, token, body_length);
-
-        free(copied_packet);
-        return body;
+    char *message;
+    if(strcmp(code, "200") == 0) { // OK
+        message = "OK";
+    } else if(strcmp(code, "404") == 0) { // Not Found
+        message = "Not Found";
+    } else { // Bad Request
+        message = "Bad Request";
     }
+
+    snprintf(
+        status_line,
+        status_line_size,
+        "HTTP/1.0 %s %s\r\n", code, message
+    );
+    return status_line;
+}
+
+char *make_header_lines(char *method, int buffer_size) {
+    /*
+    Implemented : Content-Length, Connection
+    Not implemented : User-Agent, Accept, Accept-Language, Accept-Encoding, Accept-Charset, Keep-Alive, Content-Type, and etc.
+    */
+    int header_lines_size;
+    char *header_lines, *content_length = (char *) calloc(12 * sizeof(int) + 10, sizeof(char));
+
+    if(strcmp(method, "GET") == 0) { // POST
+        sprintf(content_length, "%d", buffer_size);
+    } else { // GET
+        content_length = "0";
+    }
+    header_lines_size = 18 + strlen(content_length) + 14 + strlen("Connection: close\r\n") + 10;
+    header_lines = calloc(header_lines_size + 1, sizeof(char));
+    snprintf(
+        header_lines,
+        header_lines_size,
+        "Content-Length: %s\r\n"
+        "Connection: close\r\n"
+        "\r\n", content_length
+    );
+    free(content_length);
+    return header_lines;
+}
+
+void make_packet(char *packet, const char *status_line, const char *header_lines, const char *body) {
+    size_t status_line_size = strlen(status_line);
+    size_t header_lines_size = strlen(header_lines);
+    size_t body_size = strlen(body);
+
+    printf("status_line_size: %d\nheader_lines_size: %d\nbody_size: %d\n", status_line_size, header_lines_size, body_size);
+
+    if(packet) {
+        memcpy(packet, status_line, status_line_size);
+        memcpy(packet + status_line_size, header_lines, header_lines_size);
+        memcpy(packet + status_line_size + header_lines_size, body, body_size);
+        printf("packet_inner_function:\n%s\n", packet);
+    }
+    printf("packet_inner_length:%d\n", strlen(packet));
 }
 
 int main(int argc, char *argv[]) {
@@ -176,8 +241,13 @@ int main(int argc, char *argv[]) {
     // print_ips(serv_addr);
 
     // 2. Bind and listen
-    bind(sock_fd, serv_addr->ai_addr, serv_addr->ai_addrlen);
-    listen(sock_fd, BACKLOG);
+    if(bind(sock_fd, serv_addr->ai_addr, serv_addr->ai_addrlen) == -1) {
+        error("Error : could not bind");
+    }
+
+    if(listen(sock_fd, BACKLOG) == -1) {
+        error("Error : could not listen");
+    }
 
     // 3. Accept client and doing some actions depending on GET or POST method
     struct sockaddr_storage client_addr;
@@ -186,50 +256,102 @@ int main(int argc, char *argv[]) {
 
     int num_bytes;
     char recv_buffer[PACKET_SIZE];
-
-    /*
-    GET /test.html HTTP/1.0
-    Host: localhost
-    Content-Length: 0
-    Content-Type: application/octet-stream
-
-    POST /test.html HTTP/1.0
-    Host: localhost
-    Content-Length: 29
-    Content-Type: application/octet-stream
-
-    ����zm���3F�d��N�հQx�-
-    */
+    bool first_packet = true;
 
     while(1) {
         client_fd = accept(sock_fd, (struct sockaddr *)&client_addr, &addr_size);
         if(!fork()) { // child process
             close(sock_fd);
 
+            char *header, *method, *filename;
+            char *body_length, *body;
+            FILE *fp;
+
             while((num_bytes = recv(client_fd, recv_buffer, PACKET_SIZE, 0)) > 0) {
-                char *header = get_header_from_packet(recv_buffer);
-                // char *method = get_method_from_header(header);
-                // char *filename = get_filename_from_header(filename);
+                if(first_packet) {
+                    first_packet = false;
 
-                // printf("\n\n\n\n\n\n%s\n", header);
+                    header = get_header_from_packet(recv_buffer);
+                    method = get_method_from_header(header);
+                    filename = get_filename_from_header(header);
 
+                    if(strcmp(method, "GET") == 0) break;
+                    fp = fopen(filename, "w");
+                }
+
+                // Consider only POST method in this context
                 char *body_length = get_body_length_from_header(header);
+                char *body = calloc(atoi(body_length) + 1, sizeof(char));
+                memcpy(body, recv_buffer + strlen(header), atoi(body_length));
+                fputs(body, fp); // TODO: sizeof(buffer) or strlen(buffer)?
 
-                // printf("%s\n", body_length);
-
-                char *body = get_body_from_packet(recv_buffer, (size_t) atoi(body_length));
-
-                // printf("%s\n\n\n\n\n\n\n\n", body);
-
-                printf("%s\n", recv_buffer);
-
-                memset(header, 0, strlen(header));
-                memset(body_length, 0, strlen(header));
+                free(body);
                 memset(recv_buffer, 0, PACKET_SIZE);
+            }
+
+            if(strcmp(method, "GET") == 0) { // GET
+                fp = fopen(filename, "r");
+                if(fp == NULL) { // file doesn't exist
+                    char *status_line = make_status_line("404");
+                    char *header_lines = make_header_lines(method, 0);
+                    char *body = "";
+                    char *packet = calloc(strlen(status_line) + strlen(header_lines) + strlen(body) + 1, sizeof(char));
+                    make_packet(packet, status_line, header_lines, body);
+
+                    while((num_bytes = send(client_fd, packet, PACKET_SIZE, 0)) == -1) {
+                        if(errno == EINTR) continue;
+                        else fprintf(stderr, "Send Error : %s\n", strerror(errno));
+                    }
+
+                    free(status_line);
+                    free(header_lines);
+                    free(packet);
+                } else { // file exists
+                    int MAX_BODY_SIZE = 
+                        PACKET_SIZE
+                        - 13 // 10 + strlen(code)
+                        - 18 + 12 * sizeof(int) + 10 + 14 + strlen("Connection: close\r\n") + 10;
+                    char file_buffer[MAX_BODY_SIZE];
+                    while(fgets(file_buffer, MAX_BODY_SIZE, fp) != NULL) {
+                        char *status_line = make_status_line("200");
+                        char *header_lines = make_header_lines(method, strlen(file_buffer));
+                        char *packet = calloc(strlen(status_line) + strlen(header_lines) + strlen(file_buffer) + 1, sizeof(char));
+                        make_packet(packet, status_line, header_lines, file_buffer);
+
+                        while((num_bytes = send(client_fd, packet, PACKET_SIZE, 0)) == -1) {
+                            if(errno == EINTR) continue;
+                            else fprintf(stderr, "Send Error : %s\n", strerror(errno));
+                        }
+                        free(status_line);
+                        free(header_lines);
+                        free(packet);
+                        memset(file_buffer, 0, MAX_BODY_SIZE);
+                    }
+                }
+                fclose(fp);
+            } else { // POST or 400 Bad Request
+                char *status_line;
+                if(strcmp(method, "POST") == 0) status_line = make_status_line("200");
+                else status_line = make_status_line("400");
+                char *header_lines = make_header_lines(method, 0);
+                char *body = "";
+                char *packet = calloc(strlen(status_line) + strlen(header_lines) + strlen(body) + 1, sizeof(char));
+                make_packet(packet, status_line, header_lines, body);
+
+                while((num_bytes = send(client_fd, packet, PACKET_SIZE, 0)) == -1) {
+                    if(errno == EINTR) continue;
+                    else fprintf(stderr, "Send Error : %s\n", strerror(errno));
+                }
+
+                free(status_line);
+                free(header_lines);
+                free(packet);
             }
             close(client_fd);
             exit(EXIT_SUCCESS);
         }
-        close(client_fd); // parent process
+        else { // parent process
+            close(client_fd);
+        }
     }
 }

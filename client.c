@@ -80,15 +80,19 @@ char *get_port_from_url(char *url) {
 
 char *get_filename_from_url(char *url) {
     char **splitted_url;
-    int count = split(url, '/', &splitted_url);
-    char *filename = splitted_url[count - 1];
+    int i, count = split(url, '/', &splitted_url);
+    char *filename = calloc(strlen(url) + 1, 0);
+    for(int i = 3; i < count; ++i) { // http://host:port/file
+        strcat(filename, splitted_url[i]);
+        if(i < count - 1) strcat(filename, "/");
+    }
     return filename;
 }
 
 char *make_request_line(char *method, char *url) {
     char *filename = get_filename_from_url(url);
     int request_line_size = 20 + strlen(filename);
-    char *request_line = malloc(request_line_size + 1);
+    char *request_line = calloc(request_line_size + 1, sizeof(char));
 
     if(strcmp(method, "-G") == 0) { // get
         // int request_line_size = 16 + strlen(filename);
@@ -113,7 +117,7 @@ char *make_header_lines(char *method, char *url, int buffer_size) {
     Not implemented : User-Agent, Accept, Accept-Language, Accept-Encoding, Accept-Charset, Keep-Alive, Connection, and etc.
     */
     int header_lines_size;
-    char *header_lines, *content_length = (char *) malloc(12 * sizeof(int) + 10);
+    char *header_lines, *content_length = (char *) calloc(12 * sizeof(int) + 10, sizeof(char));
     char *host = get_host_from_url(url);
 
     if(strcmp(method, "-G") == 0) { // GET
@@ -122,7 +126,7 @@ char *make_header_lines(char *method, char *url, int buffer_size) {
         sprintf(content_length, "%d", buffer_size);
     }
     header_lines_size = 8 + strlen(host) + 18 + strlen(content_length) + strlen("Content-Type: application/octet-stream\r\n") + 10;
-    header_lines = malloc(header_lines_size + 1);
+    header_lines = calloc(header_lines_size + 1, sizeof(char));
     snprintf(
         header_lines,
         header_lines_size,
@@ -131,6 +135,7 @@ char *make_header_lines(char *method, char *url, int buffer_size) {
         "Content-Type: application/octet-stream\r\n"
         "\r\n", host, content_length
     );
+    // if(content_length) free(content_length);
     return header_lines;
 }
 
@@ -187,7 +192,7 @@ int main(int argc, char *argv[]) {
         char *request_line = make_request_line(argv[1], argv[2]);
         char *header_lines = make_header_lines(argv[1], argv[2], 0);
         char *body = "";
-        char *packet = malloc(strlen(request_line) + strlen(header_lines) + strlen(body) + 1);
+        char *packet = calloc(strlen(request_line) + strlen(header_lines) + strlen(body) + 1, sizeof(char));
         make_packet(packet, request_line, header_lines, body);
 
         printf("%s\n", packet);
@@ -201,6 +206,7 @@ int main(int argc, char *argv[]) {
             printf(recv_buffer);
             memset(recv_buffer, 0, PACKET_SIZE);
         }
+        // if(packet) free(packet);
     } else { // POST
         char *filename = get_filename_from_url(argv[2]);
         int MAX_BODY_SIZE =
@@ -212,7 +218,7 @@ int main(int argc, char *argv[]) {
         while(fgets(stdin_buffer, MAX_BODY_SIZE, stdin) != NULL) { // send all packets
             char *request_line = make_request_line(argv[1], argv[2]);
             char *header_lines = make_header_lines(argv[1], argv[2], strlen(stdin_buffer));
-            char *packet = malloc(strlen(request_line) + strlen(header_lines) + strlen(stdin_buffer) + 1);
+            char *packet = calloc(strlen(request_line) + strlen(header_lines) + strlen(stdin_buffer) + 1, sizeof(char));
             make_packet(packet, request_line, header_lines, stdin_buffer);
 
             // printf("%s\n", packet);
@@ -222,12 +228,14 @@ int main(int argc, char *argv[]) {
                 else fprintf(stderr, "Send Error : %s\n", strerror(errno));
             }
             memset(stdin_buffer, 0, MAX_BODY_SIZE);
+            // if(packet) free(packet);
         }
 
         while((num_bytes = recv(sock_fd, recv_buffer, PACKET_SIZE, 0)) > 0) { // receive all packets
             printf(recv_buffer);
             memset(recv_buffer, 0, PACKET_SIZE);
         }
+        // if(filename) free(filename);
     }
     close(sock_fd);
     exit(EXIT_SUCCESS);
