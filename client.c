@@ -1,83 +1,4 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <errno.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-
-#include <netdb.h>
-#include <stdbool.h>
-
-#define PACKET_SIZE 1024
-
-void error(const char *msg) {
-    perror(msg);
-    exit(EXIT_FAILURE);
-}
-
-int split(const char *txt, char delim, char ***tokens) {
-    int *tklen, *t, count = 1;
-    char **arr, *p = (char *) txt;
-
-    while (*p != '\0') if (*p++ == delim) count += 1;
-    t = tklen = calloc (count, sizeof (int));
-    for (p = (char *) txt; *p != '\0'; p++) *p == delim ? *t++ : (*t)++;
-    *tokens = arr = malloc (count * sizeof (char *));
-    t = tklen;
-    p = *arr++ = calloc (*(t++) + 1, sizeof (char *));
-    while (*txt != '\0')
-    {
-        if (*txt == delim)
-        {
-            p = *arr++ = calloc (*(t++) + 1, sizeof (char *));
-            txt++;
-        }
-        else *p++ = *txt++;
-    }
-    free (tklen);
-    return count;
-}
-
-char *strstrtok(char *src, char *sep) {
-    static char *str = NULL;
-    if (src) str = src;
-    else src = str;
-
-    if (str == NULL) return NULL;
-    char *next = strstr(str, sep);
-    if (next) {
-        *next = '\0';
-        str = next + strlen(sep);
-    }
-    else str = NULL;
-    return src;
-}
-
-void print_ips(struct addrinfo *lst) {
-    /* IPv4 */
-    char ipv4[INET_ADDRSTRLEN];
-    struct sockaddr_in *addr4;
-    
-    /* IPv6 */
-    char ipv6[INET6_ADDRSTRLEN];
-    struct sockaddr_in6 *addr6;
-    
-    for (; lst != NULL; lst = lst->ai_next) {
-        if (lst->ai_addr->sa_family == AF_INET) {
-            addr4 = (struct sockaddr_in *) lst->ai_addr;
-            inet_ntop(AF_INET, &addr4->sin_addr, ipv4, INET_ADDRSTRLEN);
-            printf("IP: %s\n", ipv4);
-        }
-        else if (lst->ai_addr->sa_family == AF_INET6) {
-            addr6 = (struct sockaddr_in6 *) lst->ai_addr;
-            inet_ntop(AF_INET6, &addr6->sin6_addr, ipv6, INET6_ADDRSTRLEN);
-            printf("IP: %s\n", ipv6);
-        }
-    }
-}
+#include "common.h"
 
 char *get_host_from_url(char *url) { // url : http://ip_address:port_number/test.html
     char **splitted_url, **splitted_host_port;
@@ -126,43 +47,31 @@ char *make_request_line(char *method, char *url) {
     return request_line;
 }
 
-char *make_header_lines(char *method, char *url, long long total_body_size) {
+char *make_header_lines(char *method, char *url, long long body_size) {
     /*
     Implemented : Host, Content-Length, Content-Type
     Not implemented : User-Agent, Accept, Accept-Language, Accept-Encoding, Accept-Charset, Keep-Alive, Connection, and etc.
     */
     int header_lines_size;
-    char *header_lines, *content_length = (char *) calloc(12 * sizeof(int) + 10, sizeof(char));
+    char *body_size_str = (char *) calloc(12 * sizeof(int) + 10, sizeof(char));
     char *host = get_host_from_url(url);
 
     if(strcmp(method, "-G") == 0) { // GET
-        content_length = "0";
+        body_size_str = "0";
     } else { // POST
-        sprintf(content_length, "%lld", total_body_size);
+        sprintf(body_size_str, "%lld", body_size);
     }
-    header_lines_size = 8 + strlen(host) + 18 + strlen(content_length) + strlen("Content-Type: application/octet-stream\r\n") + 10;
-    header_lines = (char *) calloc(header_lines_size + 1, sizeof(char));
+    header_lines_size = 8 + strlen(host) + 18 + strlen(body_size_str) + strlen("Content-Type: application/octet-stream\r\n") + 10;
+    char *header_lines = (char *) calloc(header_lines_size + 1, sizeof(char));
     snprintf(
         header_lines,
         header_lines_size,
         "Host: %s\r\n"
         "Content-Length: %s\r\n"
         "Content-Type: application/octet-stream\r\n"
-        "\r\n", host, content_length
+        "\r\n", host, body_size_str
     );
-    // if(content_length) free(content_length);
     return header_lines;
-}
-
-void make_packet(char *packet, const char *request_line, const char *header_lines, const char *body, const size_t body_size) {
-    size_t request_line_size = strlen(request_line);
-    size_t header_lines_size = strlen(header_lines);
-
-    if(packet) {
-        memcpy(packet, request_line, request_line_size);
-        memcpy(packet + request_line_size, header_lines, header_lines_size);
-        memcpy(packet + request_line_size + header_lines_size, body, body_size);
-    }
 }
 
 int main(int argc, char *argv[]) {
@@ -180,8 +89,6 @@ int main(int argc, char *argv[]) {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
 
-    // printf("Hi~\n");
-
     char *host = get_host_from_url(argv[2]);
     char *port = get_port_from_url(argv[2]);
     if(getaddrinfo(host, port, &hints, &serv_addr) != 0) {
@@ -195,12 +102,13 @@ int main(int argc, char *argv[]) {
         error("Error : could not create socket\n");
     }
 
+    int option = 1;
+    setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option));
+
     // 2. Connect to server
     if(connect(sock_fd, serv_addr->ai_addr, serv_addr->ai_addrlen) == -1) {
         error("Error : connection failed\n");
     }
-
-    // printf("Hello~\n");
 
     // 3. Read and write packets based on GET or POST method
     int num_bytes, packet_size;
@@ -215,54 +123,38 @@ int main(int argc, char *argv[]) {
         char *packet = (char *) calloc(strlen(request_line) + strlen(header_lines) + strlen(body), sizeof(char));
         make_packet(packet, request_line, header_lines, body, 0);
 
-        printf("%s\n", packet);
-
-        int total_bytes = 0, send_bytes = 0;
-        while(total_bytes < packet_length) { // send request once
-            send_bytes = send(sock_fd, packet + total_bytes, packet_length - total_bytes, 0);
+        int total_send_bytes = 0, send_bytes = 0;
+        while(total_send_bytes < packet_length) { // send request once
+            send_bytes = send(sock_fd, packet + total_send_bytes, packet_length - total_send_bytes, 0);
             if(send_bytes < 0) {
                 if(errno == EINTR) continue;
                 else fprintf(stderr, "Error : %s\n", strerror(errno));
             }
-            total_bytes += send_bytes;
+            total_send_bytes += send_bytes;
         }
+        free(request_line);
+        free(header_lines);
+        free(packet);
 
-        while((num_bytes = send(sock_fd, packet, PACKET_SIZE, 0)) == -1) { // send request once
-            if(errno == EINTR) continue;
-            else fprintf(stderr, "Send Error : %s\n", strerror(errno));
-        }
-
-        // TODO: parse Content-Length and receive until total message length is up to that length
         bool first_packet = true;
-        // total_bytes = 0;
+        long long total_receive_body_length = 0;
         while((num_bytes = recv(sock_fd, recv_buffer, PACKET_SIZE, 0)) > 0) { // receive all packets
-            // total_bytes += num_bytes;
             if(first_packet) {
                 first_packet = false;
-
-                printf("1~~~");
 
                 // 1. Get header
                 char *copied_packet = (char *) calloc(num_bytes, sizeof(char));
                 memcpy(copied_packet, recv_buffer, num_bytes);
                 char *token = strstrtok(copied_packet, "\r\n\r\n");
-
-                printf("2~~~");
-
                 char *header = (char *) calloc(strlen(token) + 5, sizeof(char));
                 memcpy(header, token, strlen(token));
                 memcpy(header + strlen(token), "\r\n\r\n\0", 5);
 
-                printf("header: %s\n", header);
-
-                // 2. Get Clontent-Length
+                // 2. Get Content-Length
                 char *copied_header = (char *) calloc(strlen(header), sizeof(char));
                 memcpy(copied_header, header, strlen(header));
                 char *header_token = strstrtok(copied_packet, "\r\n");
                 char *body_length = (char *) calloc(strlen(header), sizeof(char));
-
-                printf("3~~~");
-
                 while(header_token != NULL) {
                     if(strncmp(header_token, "Content-Length:", strlen("Content-Length:")) == 0) {
                         char *body_length_token = strstrtok(header_token, ": ");
@@ -273,15 +165,21 @@ int main(int argc, char *argv[]) {
                     header_token = strstrtok(NULL, "\r\n");
                 }
 
-                printf("body_length: %s\n", body_length);
-
                 fwrite(recv_buffer + strlen(header), sizeof(char), num_bytes - strlen(header), stdout);
+                total_receive_body_length += (num_bytes - strlen(header));
+
+                free(copied_packet);
+                free(header);
+                free(copied_header);
+                free(body_length);
             } else {
                 fwrite(recv_buffer, sizeof(char), num_bytes, stdout);
+                total_receive_body_length += num_bytes;
             }
             memset(recv_buffer, 0, PACKET_SIZE);
         }
-        // if(packet) free(packet);
+
+        // if(fp_stdout != NULL) fclose(fp_stdout);
     } else { // POST
         char *filename = get_filename_from_url(argv[2]);
         int MAX_BODY_SIZE =
@@ -308,8 +206,7 @@ int main(int argc, char *argv[]) {
         FILE *fp_buffer = fopen(buffer_file, "r");
         bool first_packet = true;
         while((num_bytes = fread(file_buffer, sizeof(char), MAX_BODY_SIZE, fp_buffer)) > 0 || content_length == 0) {
-            // printf("num_bytes: %d\n", num_bytes);
-            int total_bytes = 0, send_bytes = 0;
+            int total_send_bytes = 0, send_bytes = 0;
             if(first_packet) {
                 first_packet = false;
 
@@ -319,37 +216,32 @@ int main(int argc, char *argv[]) {
                 char *packet = (char *) calloc(packet_length, sizeof(char));
                 make_packet(packet, request_line, header_lines, file_buffer, num_bytes);
 
-                while(total_bytes < packet_length) {
-                    send_bytes = send(sock_fd, packet + total_bytes, packet_length - total_bytes, 0);
+                while(total_send_bytes < packet_length) {
+                    send_bytes = send(sock_fd, packet + total_send_bytes, packet_length - total_send_bytes, 0);
                     if(send_bytes < 0) {
                         if(errno == EINTR) continue;
                         else fprintf(stderr, "Error : %s\n", strerror(errno));
                     }
-                    total_bytes += send_bytes;
+                    total_send_bytes += send_bytes;
                 }
                 if(content_length == 0) content_length = -1; // consider empty file (send packet only once)
-                // if(packet) free(packet);
+                free(request_line);
+                free(header_lines);
+                free(packet);
             } else {
-                while(total_bytes < num_bytes) {
-                    send_bytes = send(sock_fd, file_buffer + total_bytes, num_bytes - total_bytes, 0);
+                while(total_send_bytes < num_bytes) {
+                    send_bytes = send(sock_fd, file_buffer + total_send_bytes, num_bytes - total_send_bytes, 0);
                     if(send_bytes < 0) {
                         if(errno == EINTR) continue;
                         else fprintf(stderr, "Error : %s\n", strerror(errno));
                     }
-                    total_bytes += send_bytes;
+                    total_send_bytes += send_bytes;
                 }
             }
             memset(file_buffer, 0, MAX_BODY_SIZE);
         }
         fclose(fp_buffer);
-        // TODO(completed): check if this works
         unlink(buffer_file);
-
-        while((num_bytes = recv(sock_fd, recv_buffer, PACKET_SIZE, 0)) > 0) { // receive all packets
-            printf("%s\n", recv_buffer);
-            memset(recv_buffer, 0, PACKET_SIZE);
-        }
-        // if(filename) free(filename);
     }
     close(sock_fd);
     exit(EXIT_SUCCESS);
