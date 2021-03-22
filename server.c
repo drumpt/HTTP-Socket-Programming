@@ -1,5 +1,52 @@
 #include "common.h"
 
+bool is_valid_request(char *request, size_t request_size) {
+    // 1. Check if request consists of header and body
+    char *copied_packet = (char *) calloc(request_size, sizeof(char));
+    memcpy(copied_packet, request, request_size);
+    char *token = strstrtok(copied_packet, "\r\n\r\n");
+
+    if(token == NULL) return false; // not consists of header and body
+
+    char *header = (char *) calloc(strlen(token) + 5, sizeof(char));
+    memcpy(header, token, strlen(token));
+    memcpy(header + strlen(token), "\r\n\r\n\0", 5);
+
+    // 2. Check if method is valid
+    char *copied_header = (char *) calloc(strlen(header), sizeof(char));
+    memcpy(copied_header, header, strlen(header));
+    char *header_token = strstrtok(copied_header, " ");
+    char *method = (char *) calloc(strlen(token), sizeof(char));
+    memcpy(method, header_token, strlen(token));
+
+    if(strncmp(method, "POST", 4) != 0 && strncmp(method, "GET", 3) != 0) return false;
+
+    // 3. Check if filename startswith  "/"
+    token = strstrtok(NULL, " ");
+    if(strncmp(token, "/", 1) != 0) return false;
+
+    // 4. Check if request line endswith "HTTP/1.0\r\n"
+    token = strstrtok(NULL, " ");
+    if(strncmp(token, "HTTP/1.0\r\n", 10) != 0) return false;
+
+    // 5. Check Content-Length
+    char *new_copied_header = (char *) calloc(strlen(header), sizeof(char));
+    memcpy(new_copied_header, header, strlen(header));
+    char *new_header_token = strstrtok(new_copied_header, "\r\n");
+    char *body_length = (char *) calloc(strlen(header), sizeof(char));
+    while(new_header_token != NULL) {
+        if(strncmp(new_header_token, "Content-Length:", strlen("Content-Length:")) == 0) {
+            char *body_length_token = strstrtok(new_header_token, ": ");
+            body_length_token = strstrtok(NULL, ": ");
+            memcpy(body_length, body_length_token, strlen(body_length_token));
+            break;
+        }
+        new_header_token = strstrtok(NULL, "\r\n");
+    }
+    if(strncmp(method, "POST", 4) == 0 && strcmp(body_length, "") == 0) return false;
+    return true;
+}
+
 char *make_status_line(char *code) {
     int status_line_size = 27;
     char *status_line = calloc(status_line_size + 1, sizeof(char));
@@ -121,11 +168,17 @@ int main(int argc, char *argv[]) {
             FILE *fp_post = NULL;
 
             bool first_packet = true;
+            bool valid = true;
             long long total_receive_body_length = 0;
             while((num_bytes = recv(client_fd, recv_buffer, PACKET_SIZE, 0)) > 0) {
-                // printf("%d\n", num_bytes);
                 if(first_packet) {
                     first_packet = false;
+
+                    // 0. Check whether request message is valid or not using regular expression
+                    if(!is_valid_request(recv_buffer, num_bytes)) {
+                        valid = false;
+                        break;
+                    }
 
                     // 1. Get header
                     char *copied_packet = (char *) calloc(num_bytes, sizeof(char));
@@ -174,7 +227,6 @@ int main(int argc, char *argv[]) {
                         fwrite(recv_buffer + strlen(header), sizeof(char), num_bytes - strlen(header), fp_post);
                     }
                 } else {
-                    // printf("%s\n", recv_buffer);
                     fwrite(recv_buffer, sizeof(char), num_bytes, fp_post);
                     total_receive_body_length += num_bytes;
                 }
@@ -218,7 +270,6 @@ int main(int argc, char *argv[]) {
                                 else fprintf(stderr, "Error : %s\n", strerror(errno));
                             }
                             total_send_bytes += send_bytes;
-                            // printf("total_send_bytes: %d\n", total_send_bytes);
                         }
                         if(content_length == 0) content_length = -1; // consider empty file (send packet only once)
                         free(packet);
@@ -237,7 +288,8 @@ int main(int argc, char *argv[]) {
                 }
             } else { // POST(OK) or 404 Not Found or 400 Bad Request
                 char *status_line;
-                if(strcmp(method, "POST") == 0) status_line = make_status_line("200");
+                if(!valid) make_status_line("400");
+                else if(strcmp(method, "POST") == 0) status_line = make_status_line("200");
                 else if(fp_get == NULL) status_line = make_status_line("404");
                 else status_line = make_status_line("400");
                 char *header_lines = make_header_lines(method, 0);

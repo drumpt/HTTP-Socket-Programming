@@ -207,7 +207,6 @@ int main(int argc, char *argv[]) {
         FILE *fp_buffer = fopen(buffer_file, "r");
         bool first_packet = true;
         while((num_bytes = fread(file_buffer, sizeof(char), MAX_BODY_SIZE, fp_buffer)) > 0 || content_length == 0) {
-            // printf("num_bytes: %d\n", num_bytes);
             int total_send_bytes = 0, send_bytes = 0;
             if(first_packet) {
                 first_packet = false;
