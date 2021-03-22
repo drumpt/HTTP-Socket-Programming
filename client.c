@@ -132,13 +132,14 @@ int main(int argc, char *argv[]) {
             }
             total_send_bytes += send_bytes;
         }
-        free(request_line);
-        free(header_lines);
         free(packet);
+
+        char *body_length = calloc(PACKET_SIZE, sizeof(char));
 
         bool first_packet = true;
         long long total_receive_body_length = 0;
-        while((num_bytes = recv(sock_fd, recv_buffer, PACKET_SIZE, 0)) > 0) { // receive all packets
+         // receive all packets
+        while((num_bytes = recv(sock_fd, recv_buffer, PACKET_SIZE, 0)) > 0) {
             if(first_packet) {
                 first_packet = false;
 
@@ -154,7 +155,7 @@ int main(int argc, char *argv[]) {
                 char *copied_header = (char *) calloc(strlen(header), sizeof(char));
                 memcpy(copied_header, header, strlen(header));
                 char *header_token = strstrtok(copied_packet, "\r\n");
-                char *body_length = (char *) calloc(strlen(header), sizeof(char));
+                body_length = (char *) calloc(strlen(header), sizeof(char));
                 while(header_token != NULL) {
                     if(strncmp(header_token, "Content-Length:", strlen("Content-Length:")) == 0) {
                         char *body_length_token = strstrtok(header_token, ": ");
@@ -171,15 +172,15 @@ int main(int argc, char *argv[]) {
                 free(copied_packet);
                 free(header);
                 free(copied_header);
-                free(body_length);
             } else {
                 fwrite(recv_buffer, sizeof(char), num_bytes, stdout);
                 total_receive_body_length += num_bytes;
             }
             memset(recv_buffer, 0, PACKET_SIZE);
+            if(total_receive_body_length >= atoll(body_length)) break;
         }
+        free(body_length);
 
-        // if(fp_stdout != NULL) fclose(fp_stdout);
     } else { // POST
         char *filename = get_filename_from_url(argv[2]);
         int MAX_BODY_SIZE =
@@ -206,6 +207,7 @@ int main(int argc, char *argv[]) {
         FILE *fp_buffer = fopen(buffer_file, "r");
         bool first_packet = true;
         while((num_bytes = fread(file_buffer, sizeof(char), MAX_BODY_SIZE, fp_buffer)) > 0 || content_length == 0) {
+            // printf("num_bytes: %d\n", num_bytes);
             int total_send_bytes = 0, send_bytes = 0;
             if(first_packet) {
                 first_packet = false;
@@ -225,8 +227,6 @@ int main(int argc, char *argv[]) {
                     total_send_bytes += send_bytes;
                 }
                 if(content_length == 0) content_length = -1; // consider empty file (send packet only once)
-                free(request_line);
-                free(header_lines);
                 free(packet);
             } else {
                 while(total_send_bytes < num_bytes) {
@@ -242,6 +242,53 @@ int main(int argc, char *argv[]) {
         }
         fclose(fp_buffer);
         unlink(buffer_file);
+
+        char *body_length = (char *) calloc(PACKET_SIZE, sizeof(char));
+
+        first_packet = true;
+        long long total_receive_body_length = 0;
+        while((num_bytes = recv(sock_fd, recv_buffer, PACKET_SIZE, 0)) > 0) {
+            if(first_packet) {
+                first_packet = false;
+
+                // 1. Get header
+                char *copied_packet = (char *) calloc(num_bytes, sizeof(char));
+                memcpy(copied_packet, recv_buffer, num_bytes);
+                char *token = strstrtok(copied_packet, "\r\n\r\n");
+                char *header = (char *) calloc(strlen(token) + 5, sizeof(char));
+                memcpy(header, token, strlen(token));
+                memcpy(header + strlen(token), "\r\n\r\n\0", 5);
+
+                // 2. Get Content-Length
+                char *copied_header = (char *) calloc(strlen(header), sizeof(char));
+                memcpy(copied_header, header, strlen(header));
+                char *header_token = strstrtok(copied_packet, "\r\n");
+                body_length = (char *) calloc(strlen(header), sizeof(char));
+                while(header_token != NULL) {
+                    if(strncmp(header_token, "Content-Length:", strlen("Content-Length:")) == 0) {
+                        char *body_length_token = strstrtok(header_token, ": ");
+                        body_length_token = strstrtok(NULL, ": ");
+                        memcpy(body_length, body_length_token, strlen(body_length_token));
+                        break;
+                    }
+                    header_token = strstrtok(NULL, "\r\n");
+                }
+
+                fwrite(recv_buffer + strlen(header), sizeof(char), num_bytes - strlen(header), stdout);
+                total_receive_body_length += (num_bytes - strlen(header));
+
+                free(copied_packet);
+                free(header);
+                free(copied_header);
+            } else {
+                fwrite(recv_buffer, sizeof(char), num_bytes, stdout);
+                total_receive_body_length += num_bytes;
+            }
+            memset(recv_buffer, 0, PACKET_SIZE);
+            if(total_receive_body_length >= atoll(body_length)) break;
+        }
+        free(filename);
+        free(body_length);
     }
     close(sock_fd);
     exit(EXIT_SUCCESS);

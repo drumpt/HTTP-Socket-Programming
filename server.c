@@ -123,6 +123,7 @@ int main(int argc, char *argv[]) {
             bool first_packet = true;
             long long total_receive_body_length = 0;
             while((num_bytes = recv(client_fd, recv_buffer, PACKET_SIZE, 0)) > 0) {
+                // printf("%d\n", num_bytes);
                 if(first_packet) {
                     first_packet = false;
 
@@ -150,7 +151,7 @@ int main(int argc, char *argv[]) {
                     char *new_copied_header = (char *) calloc(strlen(header), sizeof(char));
                     memcpy(new_copied_header, header, strlen(header));
                     char *new_header_token = strstrtok(new_copied_header, "\r\n");
-                    char *body_length = (char *) calloc(strlen(header), sizeof(char));
+                    body_length = (char *) calloc(strlen(header), sizeof(char));
                     while(new_header_token != NULL) {
                         if(strncmp(new_header_token, "Content-Length:", strlen("Content-Length:")) == 0) {
                             char *body_length_token = strstrtok(new_header_token, ": ");
@@ -165,7 +166,6 @@ int main(int argc, char *argv[]) {
                     free(copied_packet);
                     free(copied_header);
                     free(new_copied_header);
-                    free(body_length);
 
                     if(strcmp(method, "GET") == 0) break;
                     else { // POST
@@ -174,15 +174,18 @@ int main(int argc, char *argv[]) {
                         fwrite(recv_buffer + strlen(header), sizeof(char), num_bytes - strlen(header), fp_post);
                     }
                 } else {
+                    // printf("%s\n", recv_buffer);
                     fwrite(recv_buffer, sizeof(char), num_bytes, fp_post);
+                    total_receive_body_length += num_bytes;
                 }
                 memset(recv_buffer, 0, PACKET_SIZE);
+                if(total_receive_body_length >= atoll(body_length)) break;
             }
             if(fp_post != NULL) fclose(fp_post);
-
+            
             FILE *fp_get = fopen(filename, "r");
+            first_packet = true;
             if(strcmp(method, "GET") == 0 && fp_get != NULL) { // GET : need to send file
-                bool first_packet = true;
                 int MAX_BODY_SIZE = 
                     PACKET_SIZE
                     - 13 // 10 + strlen(code)
