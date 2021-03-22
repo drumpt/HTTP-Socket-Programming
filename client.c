@@ -9,7 +9,7 @@
 #include <arpa/inet.h>
 
 #include <netdb.h>
-
+#include <stdbool.h>
 
 #define PACKET_SIZE 1024
 
@@ -39,6 +39,21 @@ int split(const char *txt, char delim, char ***tokens) {
     }
     free (tklen);
     return count;
+}
+
+char *strstrtok(char *src, char *sep) {
+    static char *str = NULL;
+    if (src) str = src;
+    else src = str;
+
+    if (str == NULL) return NULL;
+    char *next = strstr(str, sep);
+    if (next) {
+        *next = '\0';
+        str = next + strlen(sep);
+    }
+    else str = NULL;
+    return src;
 }
 
 void print_ips(struct addrinfo *lst) {
@@ -111,7 +126,7 @@ char *make_request_line(char *method, char *url) {
     return request_line;
 }
 
-char *make_header_lines(char *method, char *url, int buffer_size) {
+char *make_header_lines(char *method, char *url, long long total_body_size) {
     /*
     Implemented : Host, Content-Length, Content-Type
     Not implemented : User-Agent, Accept, Accept-Language, Accept-Encoding, Accept-Charset, Keep-Alive, Connection, and etc.
@@ -123,7 +138,7 @@ char *make_header_lines(char *method, char *url, int buffer_size) {
     if(strcmp(method, "-G") == 0) { // GET
         content_length = "0";
     } else { // POST
-        sprintf(content_length, "%d", buffer_size);
+        sprintf(content_length, "%lld", total_body_size);
     }
     header_lines_size = 8 + strlen(host) + 18 + strlen(content_length) + strlen("Content-Type: application/octet-stream\r\n") + 10;
     header_lines = (char *) calloc(header_lines_size + 1, sizeof(char));
@@ -165,7 +180,7 @@ int main(int argc, char *argv[]) {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
 
-    printf("Hi~\n");
+    // printf("Hi~\n");
 
     char *host = get_host_from_url(argv[2]);
     char *port = get_port_from_url(argv[2]);
@@ -185,7 +200,7 @@ int main(int argc, char *argv[]) {
         error("Error : connection failed\n");
     }
 
-    printf("Hello~\n");
+    // printf("Hello~\n");
 
     // 3. Read and write packets based on GET or POST method
     int num_bytes, packet_size;
@@ -196,19 +211,74 @@ int main(int argc, char *argv[]) {
         char *request_line = make_request_line(argv[1], argv[2]);
         char *header_lines = make_header_lines(argv[1], argv[2], 0);
         char *body = "";
+        int packet_length = strlen(request_line) + strlen(header_lines) + strlen(body);
         char *packet = (char *) calloc(strlen(request_line) + strlen(header_lines) + strlen(body), sizeof(char));
         make_packet(packet, request_line, header_lines, body, 0);
 
         printf("%s\n", packet);
+
+        int total_bytes = 0, send_bytes = 0;
+        while(total_bytes < packet_length) { // send request once
+            send_bytes = send(sock_fd, packet + total_bytes, packet_length - total_bytes, 0);
+            if(send_bytes < 0) {
+                if(errno == EINTR) continue;
+                else fprintf(stderr, "Error : %s\n", strerror(errno));
+            }
+            total_bytes += send_bytes;
+        }
 
         while((num_bytes = send(sock_fd, packet, PACKET_SIZE, 0)) == -1) { // send request once
             if(errno == EINTR) continue;
             else fprintf(stderr, "Send Error : %s\n", strerror(errno));
         }
 
+        // TODO: parse Content-Length and receive until total message length is up to that length
+        bool first_packet = true;
+        // total_bytes = 0;
         while((num_bytes = recv(sock_fd, recv_buffer, PACKET_SIZE, 0)) > 0) { // receive all packets
-            printf("%d\n", num_bytes);
-            printf("%s\n", recv_buffer);
+            // total_bytes += num_bytes;
+            if(first_packet) {
+                first_packet = false;
+
+                printf("1~~~");
+
+                // 1. Get header
+                char *copied_packet = (char *) calloc(num_bytes, sizeof(char));
+                memcpy(copied_packet, recv_buffer, num_bytes);
+                char *token = strstrtok(copied_packet, "\r\n\r\n");
+
+                printf("2~~~");
+
+                char *header = (char *) calloc(strlen(token) + 5, sizeof(char));
+                memcpy(header, token, strlen(token));
+                memcpy(header + strlen(token), "\r\n\r\n\0", 5);
+
+                printf("header: %s\n", header);
+
+                // 2. Get Clontent-Length
+                char *copied_header = (char *) calloc(strlen(header), sizeof(char));
+                memcpy(copied_header, header, strlen(header));
+                char *header_token = strstrtok(copied_packet, "\r\n");
+                char *body_length = (char *) calloc(strlen(header), sizeof(char));
+
+                printf("3~~~");
+
+                while(header_token != NULL) {
+                    if(strncmp(header_token, "Content-Length:", strlen("Content-Length:")) == 0) {
+                        char *body_length_token = strstrtok(header_token, ": ");
+                        body_length_token = strstrtok(NULL, ": ");
+                        memcpy(body_length, body_length_token, strlen(body_length_token));
+                        break;
+                    }
+                    header_token = strstrtok(NULL, "\r\n");
+                }
+
+                printf("body_length: %s\n", body_length);
+
+                fwrite(recv_buffer + strlen(header), sizeof(char), num_bytes - strlen(header), stdout);
+            } else {
+                fwrite(recv_buffer, sizeof(char), num_bytes, stdout);
+            }
             memset(recv_buffer, 0, PACKET_SIZE);
         }
         // if(packet) free(packet);
@@ -218,28 +288,63 @@ int main(int argc, char *argv[]) {
             PACKET_SIZE
             - (20 + strlen(filename) + 1)
             - (8 + strlen(host) + 18 + 12 * sizeof(int) + 10 + strlen("Content-Type: application/octet-stream\r\n") + 10);
-        char stdin_buffer[MAX_BODY_SIZE]; // maximum body size
+        char stdin_buffer[MAX_BODY_SIZE], file_buffer[MAX_BODY_SIZE]; // maximum body size
         memset(stdin_buffer, 0, MAX_BODY_SIZE);
 
-        size_t total_file_length = 0;
+        char buffer_file[10];
+        memset(buffer_file, 0, sizeof(buffer_file));
+        strncpy(buffer_file, "XXXXXXXXXX", 10);
+        int fd = mkstemp(buffer_file);
+        long long content_length = 0;
 
-        while((num_bytes = fread(stdin_buffer, sizeof(char), MAX_BODY_SIZE, stdin)) > 0) { // send all packets
-            char *request_line = make_request_line(argv[1], argv[2]);
-            char *header_lines = make_header_lines(argv[1], argv[2], num_bytes);
-            char *packet = (char *) calloc(strlen(request_line) + strlen(header_lines) + num_bytes, sizeof(char));
-            make_packet(packet, request_line, header_lines, stdin_buffer, num_bytes);
-
-            // printf("%s\n", packet);
-            total_file_length += num_bytes;
-
-            while((num_bytes = send(sock_fd, packet, strlen(request_line) + strlen(header_lines) + num_bytes, 0)) == -1) {
-                if(errno == EINTR) continue;
-                else fprintf(stderr, "Send Error : %s\n", strerror(errno));
-            }
+        FILE *fp = fdopen(fd, "w");
+        while((num_bytes = fread(stdin_buffer, sizeof(char), MAX_BODY_SIZE, stdin)) > 0) {
+            content_length += num_bytes;
+            fwrite(stdin_buffer, sizeof(char), num_bytes, fp);
             memset(stdin_buffer, 0, MAX_BODY_SIZE);
-            // if(packet) free(packet);
         }
-        // printf("%u\n", total_file_length);
+        fclose(fp);
+
+        FILE *fp_buffer = fopen(buffer_file, "r");
+        bool first_packet = true;
+        while((num_bytes = fread(file_buffer, sizeof(char), MAX_BODY_SIZE, fp_buffer)) > 0 || content_length == 0) {
+            // printf("num_bytes: %d\n", num_bytes);
+            int total_bytes = 0, send_bytes = 0;
+            if(first_packet) {
+                first_packet = false;
+
+                char *request_line = make_request_line(argv[1], argv[2]);
+                char *header_lines = make_header_lines(argv[1], argv[2], content_length);
+                int packet_length = strlen(request_line) + strlen(header_lines) + num_bytes;
+                char *packet = (char *) calloc(packet_length, sizeof(char));
+                make_packet(packet, request_line, header_lines, file_buffer, num_bytes);
+
+                while(total_bytes < packet_length) {
+                    send_bytes = send(sock_fd, packet + total_bytes, packet_length - total_bytes, 0);
+                    if(send_bytes < 0) {
+                        if(errno == EINTR) continue;
+                        else fprintf(stderr, "Error : %s\n", strerror(errno));
+                    }
+                    total_bytes += send_bytes;
+                }
+                if(content_length == 0) content_length = -1; // consider empty file (send packet only once)
+                // if(packet) free(packet);
+            } else {
+                while(total_bytes < num_bytes) {
+                    send_bytes = send(sock_fd, file_buffer + total_bytes, num_bytes - total_bytes, 0);
+                    if(send_bytes < 0) {
+                        if(errno == EINTR) continue;
+                        else fprintf(stderr, "Error : %s\n", strerror(errno));
+                    }
+                    total_bytes += send_bytes;
+                }
+            }
+            memset(file_buffer, 0, MAX_BODY_SIZE);
+        }
+        fclose(fp_buffer);
+        // TODO(completed): check if this works
+        unlink(buffer_file);
+
         while((num_bytes = recv(sock_fd, recv_buffer, PACKET_SIZE, 0)) > 0) { // receive all packets
             printf("%s\n", recv_buffer);
             memset(recv_buffer, 0, PACKET_SIZE);
