@@ -3,10 +3,10 @@
 all: client server
 
 client: client.c
-	gcc-9 -o client client.c common.c
+	gcc -o client client.c common.c
 
 server: server.c
-	gcc-9 -o server server.c common.c
+	gcc -o server server.c common.c
 
 
 SERVER_PORT := 8888

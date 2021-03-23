@@ -1,3 +1,10 @@
-test/*
 **/.DS_Store
+
 *.bin
+!file_0B.bin
+!file_2M.bin
+!file_4K.bin
+!file_512M.bin
+
+server
+client
