@@ -1,4 +1,4 @@
-# 2021-S CS341 Lab 1 Student Kit
+# HTTP Socket Programming
 
 ## Testing Environment
 
