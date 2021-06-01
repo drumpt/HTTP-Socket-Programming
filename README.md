@@ -2,8 +2,6 @@
 
 ## Testing Environment
 
-We will use `ubuntu:focal` docker image with below toolchain or later.
-
 ### Compiler
 ```
 gcc (Ubuntu 9.3.0-17ubuntu1~20.04) 9.3.0
@@ -51,8 +49,6 @@ $ make test TESTFILE=file_4K.bin
 ```
 
 ## Test All
-**Note: passing tests is only necessary condition for full credit.**
-
 ```bash
 $ make test-all
 ```
