@@ -122,7 +122,7 @@ int main(int argc, char *argv[]) {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
 
-    char *host = "localhost";
+    char *host = "0.0.0.0";
     char *port = argv[2];
 
     if(getaddrinfo(host, port, &hints, &serv_addr) != 0) {
